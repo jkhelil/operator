@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"sync"
 	"time"
 
 	security "github.com/openshift/client-go/security/clientset/versioned"
@@ -82,7 +83,7 @@ var nsRegex = regexp.MustCompile(reconcilerCommon.NamespaceIgnorePattern)
 type rbac struct {
 	kubeClientSet     kubernetes.Interface
 	operatorClientSet clientset.Interface
-	securityClientSet *security.Clientset
+	securityClientSet security.Interface
 	rbacInformer      rbacV1.ClusterRoleBindingInformer
 	nsInformer        nsV1.NamespaceInformer
 	ownerRef          metav1.OwnerReference
@@ -118,7 +119,7 @@ func (r *rbac) EnsureRBACInstallerSet(ctx context.Context) (*v1alpha1.TektonInst
 		return nil, err
 	}
 
-	rbacISet, err := checkIfInstallerSetExist(ctx, r.operatorClientSet, r.version, r.tektonConfig)
+	rbacISet, err := checkIfInstallerSetExist(ctx, r.operatorClientSet, r.version)
 	if err != nil {
 		return nil, err
 	}
@@ -393,42 +394,59 @@ func (r *rbac) createResources(ctx context.Context) error {
 		return err
 	}
 
+	var wg sync.WaitGroup
 	for _, ns := range namespacesToBeReconciled {
-		logger.Infow("Inject CA bundle configmap in ", "Namespace", ns.GetName())
-		if err := r.ensureCABundles(ctx, &ns); err != nil {
-			return fmt.Errorf("failed to ensure ca bundles presence in namespace %s, %w", ns.Name, err)
-		}
+		wg.Add(1)
+		//loopclosure
+		ns := ns
+		go func() {
+			defer wg.Done()
+			r.processResourcesForSingleNamespace(ctx, ns)
+		}()
+	}
+	wg.Wait()
 
-		logger.Infow("Ensures Default SA in ", "Namespace", ns.GetName())
-		sa, err := r.ensureSA(ctx, &ns)
-		if err != nil {
-			return fmt.Errorf("failed to ensure default SA in namespace %s, %w", ns.Name, err)
-		}
+	return nil
+}
 
-		// If "operator.tekton.dev/scc" exists in the namespace, then bind
-		// that SCC to the SA
-		err = r.handleSCCInNamespace(ctx, &ns)
-		if err != nil {
-			return fmt.Errorf("failed to bind scc to namespace %s; %w", ns.Name, err)
-		}
+func (r *rbac) processResourcesForSingleNamespace(ctx context.Context, ns corev1.Namespace) error {
+	logger := logging.FromContext(ctx)
+	logger.Infow("Inject CA bundle configmap in ", "Namespace", ns.GetName())
+	if err := r.ensureCABundles(ctx, &ns); err != nil {
+		logger.Errorf("failed to ensure ca bundles presence in namespace %s, %w", ns.Name, err)
+	}
 
-		// We use a namespace scoped Role when SCC annotation is present, and
-		// a cluster scoped ClusterRole when the default SCC is used
-		roleRef := r.getSCCRoleInNamespace(&ns)
-		if err := r.ensurePipelinesSCCRoleBinding(ctx, sa, roleRef); err != nil {
-			return fmt.Errorf("failed to create Pipeline Scc Role Binding in namespace %s, %w", ns.Name, err)
-		}
+	logger.Infow("Ensures Default SA in ", "Namespace", ns.GetName())
+	sa, err := r.ensureSA(ctx, &ns)
+	if err != nil {
+		logger.Errorf("failed to ensure default SA in namespace %s, %w", ns.Name, err)
+	}
 
-		if err := r.ensureRoleBindings(ctx, sa); err != nil {
-			return err
-		}
+	// If "operator.tekton.dev/scc" exists in the namespace, then bind
+	// that SCC to the SA
+	err = r.handleSCCInNamespace(ctx, &ns)
+	if err != nil {
+		logger.Errorf("failed to bind scc to namespace %s; %w", ns.Name, err)
+	}
 
-		if err := r.ensureClusterRoleBindings(ctx, sa); err != nil {
-			return err
-		}
+	// We use a namespace scoped Role when SCC annotation is present, and
+	// a cluster scoped ClusterRole when the default SCC is used
+	roleRef := r.getSCCRoleInNamespace(&ns)
+	if err := r.ensurePipelinesSCCRoleBinding(ctx, sa, roleRef); err != nil {
+		logger.Errorf("failed to create Pipeline Scc Role Binding in namespace %s, %w", ns.Name, err)
+	}
 
-		// Add `openshift-pipelines.tekton.dev/namespace-reconcile-version` label to namespace
-		// so that rbac won't loop on it again
+	if err := r.ensureRoleBindings(ctx, sa); err != nil {
+		logger.Errorf("failed to create rolebinding in namespace %s, %w", ns.Name, err)
+	}
+
+	if err := r.ensureClusterRoleBindings(ctx, sa); err != nil {
+		logger.Errorf("failed to create clusterrolebinding in namespace %s, %w", ns.Name, err)
+	}
+
+	// Add `openshift-pipelines.tekton.dev/namespace-reconcile-version` label to namespace
+	// so that rbac won't loop on it again
+	if err != nil {
 		nsLabels := ns.GetLabels()
 		if len(nsLabels) == 0 {
 			nsLabels = map[string]string{}
@@ -436,10 +454,9 @@ func (r *rbac) createResources(ctx context.Context) error {
 		nsLabels[namespaceVersionLabel] = r.version
 		ns.SetLabels(nsLabels)
 		if _, err := r.kubeClientSet.CoreV1().Namespaces().Update(ctx, &ns, metav1.UpdateOptions{}); err != nil {
-			return fmt.Errorf("failed to update namespace %s with label %s, %w", ns.Name, namespaceVersionLabel, err)
+			logger.Errorf("failed to update namespace %s with label %s, %w", ns.Name, namespaceVersionLabel, err)
 		}
 	}
-
 	return nil
 }
 
