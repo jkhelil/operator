@@ -141,7 +141,6 @@ func TestPostReconcileManifest(t *testing.T) {
 						require.NoError(t, err)
 						require.True(t, found)
 						require.Equal(t, test.targetNamespace, actualNamespace)
-
 					}
 				}
 			}

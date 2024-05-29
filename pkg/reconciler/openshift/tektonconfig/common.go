@@ -42,7 +42,6 @@ func createInstallerSet(ctx context.Context, oc versioned.Interface, tc *v1alpha
 
 	is := makeInstallerSet(tc, releaseVersion)
 	is.Spec.Manifests = pipelinescc.Resources()
-
 	createdIs, err := oc.OperatorV1alpha1().TektonInstallerSets().
 		Create(ctx, is, metav1.CreateOptions{})
 	if err != nil && !errors.IsAlreadyExists(err) {
@@ -102,19 +101,20 @@ func deleteInstallerSet(ctx context.Context, oc versioned.Interface, tc *v1alpha
 // and if installer set which already exist is of older version then it deletes and return false to create a new
 // installer set
 func checkIfInstallerSetExist(ctx context.Context, oc versioned.Interface, relVersion string) (*v1alpha1.TektonInstallerSet, error) {
-
 	labelSelector, err := common.LabelSelector(rbacInstallerSetSelector)
 	if err != nil {
 		return nil, fmt.Errorf("failed to retreive labelSelector with selector %v: %w", rbacInstallerSetSelector, err)
 	}
+
 	existingInstallerSet, err := tektoninstallerset.CurrentInstallerSetName(ctx, oc, labelSelector)
+	fmt.Println("dqsqdqsdqsdqsddqs")
+	fmt.Println(existingInstallerSet)
 	if err != nil {
 		return nil, fmt.Errorf("failed to retreive existing InstallerSet with selector %v: %w", labelSelector, err)
 	}
 	if existingInstallerSet == "" {
 		return nil, nil
 	}
-
 	// if already created then check which version it is
 	ctIs, err := oc.OperatorV1alpha1().TektonInstallerSets().
 		Get(ctx, existingInstallerSet, metav1.GetOptions{})

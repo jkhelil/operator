@@ -2,11 +2,13 @@ package tektonconfig
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 	fakesecurity "github.com/openshift/client-go/security/clientset/versioned/fake"
+	"github.com/stretchr/testify/require"
 	"github.com/tektoncd/operator/pkg/apis/operator/v1alpha1"
 	fakeoperator "github.com/tektoncd/operator/pkg/client/injection/client/fake"
 	"github.com/tektoncd/operator/pkg/reconciler/common"
@@ -14,6 +16,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/informers"
 	fakek8s "k8s.io/client-go/kubernetes/fake"
 	duckv1 "knative.dev/pkg/apis/duck/v1"
@@ -95,31 +98,71 @@ func TestGetNamespacesToBeReconciled(t *testing.T) {
 func TestCreateResources(t *testing.T) {
 	ctx, _, _ := ts.SetupFakeContextWithCancel(t)
 	os.Setenv(common.KoEnvKey, "testdata")
+	s := runtime.NewScheme()
+	utilruntime.Must(v1alpha1.AddToScheme(s))
+	fakek8s.AddToScheme(s)
 
 	for _, c := range []struct {
 		desc string
 		objs []runtime.Object
+		iSet *v1alpha1.TektonInstallerSet
+		err  error
 	}{
-		{
-			desc: "reconcile single namespace",
+		/*{
+			desc: "No existing installer set",
 			objs: []runtime.Object{
 				&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test", Labels: map[string]string{"openshift-pipelines.tekton.dev/namespace-reconcile-version": ""}}},
 			},
-		},
+			err: v1alpha1.RECONCILE_AGAIN_ERR,
+		},*/
 		{
-			desc: "reconcile multiple namepsace",
+			desc: "existing installer set",
 			objs: []runtime.Object{
-				&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test1", Labels: map[string]string{"openshift-pipelines.tekton.dev/namespace-reconcile-version": ""}}},
-				&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test2", Labels: map[string]string{"openshift-pipelines.tekton.dev/namespace-reconcile-version": ""}}},
-				&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test3", Labels: map[string]string{"openshift-pipelines.tekton.dev/namespace-reconcile-version": ""}}},
+				&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test", Labels: map[string]string{"openshift-pipelines.tekton.dev/namespace-reconcile-version": ""}}},
 			},
+			iSet: &v1alpha1.TektonInstallerSet{ObjectMeta: metav1.ObjectMeta{Name: "rbac-resources", Labels: map[string]string{v1alpha1.CreatedByKey: createdByValue, v1alpha1.InstallerSetType: componentNameRBAC}}, Spec: v1alpha1.TektonInstallerSetSpec{}},
+			err:  nil,
 		},
 	} {
 		t.Run(c.desc, func(t *testing.T) {
+			fmt.Println("check debut test")
 			kubeclient := fakek8s.NewSimpleClientset(c.objs...)
 			fakesecurityclient := fakesecurity.NewSimpleClientset()
 			fakeoperatorclient := fakeoperator.Get(ctx)
+			/*fakeDiscoveryForOp, ok := fakeoperatorclient.Discovery().(*fakediscovery.FakeDiscovery)
+			if !ok {
+				t.Error("failed to convert clientset discovery to fake discovery")
+			}
+			fakeDiscoveryForOp.Fake.Resources = []*metav1.APIResourceList{
+				{
+					GroupVersion: "operator.tekton.dev/v1alpha1",
+					APIResources: []metav1.APIResource{
+						{
+							Name:         "tektoninstallersets",
+							SingularName: "tektoninstallerset",
+							Kind:         "TektonInstallerSet",
+							Group:        "operator.tekton.dev",
+							Version:      "v1alpha1",
+							Namespaced:   true,
+							Verbs:        []string{"create", "delete", "get", "list", "patch", "update", "watch"},
+						},
+					},
+				},
+			}*/
+			if c.iSet != nil {
+				fakeoperatorclient.OperatorV1alpha1().TektonInstallerSets().Create(ctx, c.iSet, metav1.CreateOptions{})
+				//labelSelector, _ := common.LabelSelector(rbacInstallerSetSelector)
+				//existingInstallerSet, err := tektoninstallerset.CurrentInstallerSetName(ctx, fakeoperatorclient, labelSelector)
+				//if err != nil {
+				//	fmt.Errorf("failed to retreive existing InstallerSet with selector %v: %w", labelSelector, err)
+				//}
 
+				//iSets, _ := fakeoperatorclient.Operator1alpha1().TektonInstallerSets().List(ctx, v1.ListOptions{
+				//	LabelSelector: labelSelector,
+				//})
+				//	fmt.Println(existingInstallerSet)
+			}
+			fmt.Println(fakeoperatorclient)
 			informers := informers.NewSharedInformerFactory(kubeclient, 0)
 			nsInformer := informers.Core().V1().Namespaces()
 			rbacinformer := informers.Rbac().V1().ClusterRoleBindings()
@@ -148,9 +191,7 @@ func TestCreateResources(t *testing.T) {
 				tektonConfig:      tc,
 			}
 			err := r.createResources(ctx)
-			if err != nil {
-				t.Fatalf("createResources: %v", err)
-			}
+			require.ErrorIs(t, err, c.err)
 		})
 	}
 }

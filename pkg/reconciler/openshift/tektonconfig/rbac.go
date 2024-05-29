@@ -374,6 +374,7 @@ func (r *rbac) handleSCCInNamespace(ctx context.Context, ns *corev1.Namespace) e
 }
 
 func (r *rbac) createResources(ctx context.Context) error {
+	fmt.Println("je susi la ")
 	logger := logging.FromContext(ctx)
 
 	if err := r.ensurePreRequisites(ctx); err != nil {
