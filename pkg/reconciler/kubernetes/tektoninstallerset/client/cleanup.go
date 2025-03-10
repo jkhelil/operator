@@ -160,3 +160,36 @@ func (i *InstallerSetClient) cleanupSubType(ctx context.Context, isType string, 
 	}
 	return nil
 }
+
+func (i *InstallerSetClient) CleanupWithLabelInstallTypeDeployment(ctx context.Context, isType string) error {
+	return i.cleanupWithLabel(ctx, isType, InstallerSubTypeDeployment)
+}
+
+func (i *InstallerSetClient) CleanupWithLabelInstallTypeStatefulset(ctx context.Context, isType string) error {
+	return i.cleanupWithLabel(ctx, isType, InstallerSubTypeStatefulset)
+}
+
+// cleanupWithLabel cleans installersets using isType as label selector example
+// v1alpha1.InstallerSetType: chain and v1alpha1.InstallerSetInstallType: deployment
+func (i *InstallerSetClient) cleanupWithLabel(ctx context.Context, isType string, isInstallType string) error {
+	logger := logging.FromContext(ctx).With("kind", i.resourceKind, "type", isType)
+
+	list, err := i.clientSet.List(ctx, metav1.ListOptions{LabelSelector: i.getSetLabelsWithTypeAndInstallType(isType, isInstallType)})
+	if err != nil {
+		return err
+	}
+	if len(list.Items) != 1 {
+		logger.Errorf("found more than 1 installerSet for %s something fishy, cleaning up all", isType)
+	}
+
+	for _, is := range list.Items {
+		logger.Debugf("deleting %s installer set: %s, of installType: %s", isType, is.GetName(), isInstallType)
+		err = i.clientSet.Delete(ctx, is.GetName(), metav1.DeleteOptions{
+			PropagationPolicy: &deletePropagationPolicy,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to delete %s set: %s", isType, is.GetName())
+		}
+	}
+	return nil
+}
