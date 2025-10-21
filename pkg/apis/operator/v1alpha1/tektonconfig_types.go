@@ -180,6 +180,12 @@ type Config struct {
 	// PriorityClassName holds the priority class to be set to pod template
 	// +optional
 	PriorityClassName string `json:"priorityClassName,omitempty"`
+	// ImagePullSecrets is a list of references to secrets in the same namespace to use
+	// for pulling any of the images used by pods of operator-managed Deployments.
+	// This will be applied to all relevant Deployments, including the
+	// `tekton-operator-proxy-webhook` Deployment.
+	// +optional
+	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
 }
 
 type Platforms struct {
