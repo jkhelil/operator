@@ -1,0 +1,134 @@
+# Opens a PR that bumps operator version labels and the Helm chart for an
+# upcoming patch or minor release. Same version semantics as
+# hack/release-setup-branch.sh; merge before running Patch Release / PAC.
+#
+# Two commits: hack/bump-crds-version.sh then hack/bump-chart-version.sh.
+# Current release is inferred once via hack/infer-operator-release-from-config.sh
+# (same source as the dashboard CRD label).
+name: Pre-release (version bump PR)
+
+"on":
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Release branch (e.g. release-v0.79.x); must match version major.minor"
+        required: true
+        type: string
+      version:
+        description: "Version to release (e.g. v0.79.1); same meaning as Patch Release"
+        required: true
+        type: string
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+jobs:
+  open-bump-pr:
+    name: Bump versions and open PR
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Validate inputs
+        run: |
+          if [[ ! "${{ inputs.branch }}" =~ ^release-v[0-9]+\.[0-9]+\.x$ ]]; then
+            echo "::error::Invalid branch format: ${{ inputs.branch }}. Expected: release-vX.Y.x"
+            exit 1
+          fi
+          if [[ ! "${{ inputs.version }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid version format: ${{ inputs.version }}. Expected: vX.Y.Z"
+            exit 1
+          fi
+          t="${{ inputs.version }}"
+          t="${t#v}"
+          mm="${t%.*}"
+          expected="release-v${mm}.x"
+          if [[ "${{ inputs.branch }}" != "${expected}" ]]; then
+            echo "::error::branch must be '${expected}' for version ${t} (got '${{ inputs.branch }}')"
+            exit 1
+          fi
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+          fetch-tags: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create bump branch, bump, push
+        id: bump
+        env:
+          GIT_USER_NAME: github-actions[bot]
+          GIT_USER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          set -euo pipefail
+          TARGET="${{ inputs.version }}"
+          T="${TARGET#v}"
+          WORK_BRANCH="robot/prepare-${T//./-}"
+          if git ls-remote --heads origin "${WORK_BRANCH}" | grep -q .; then
+            echo "::error::Remote branch ${WORK_BRANCH} already exists"
+            exit 1
+          fi
+          git checkout -b "${WORK_BRANCH}"
+          git config user.name "${GIT_USER_NAME}"
+          git config user.email "${GIT_USER_EMAIL}"
+
+          CURRENT="$(./hack/infer-operator-release-from-config.sh)"
+          echo "::notice::Inferred current from config: ${CURRENT}"
+
+          ./hack/bump-crds-version.sh "${CURRENT}" "${TARGET}"
+          git add -u cmd/ config/
+          labels_changed=false
+          if ! git diff --staged --quiet; then
+            git commit -m "Bump CRD / operator manifest versions for v${T}"
+            labels_changed=true
+          fi
+
+          ./hack/bump-chart-version.sh "${CURRENT}" "${TARGET}"
+          git add -u charts/tekton-operator/
+          chart_changed=false
+          if ! git diff --staged --quiet; then
+            git commit -m "Bump Helm chart for v${T}"
+            chart_changed=true
+          fi
+
+          if [[ "${labels_changed}" != "true" && "${chart_changed}" != "true" ]]; then
+            echo "has-commit=false" >> "${GITHUB_OUTPUT}"
+            echo "work-branch=" >> "${GITHUB_OUTPUT}"
+            git checkout "${{ inputs.branch }}"
+            git branch -D "${WORK_BRANCH}"
+            exit 0
+          fi
+
+          git push -u origin "${WORK_BRANCH}"
+          {
+            echo "has-commit=true"
+            echo "work-branch=${WORK_BRANCH}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Open pull request
+        if: steps.bump.outputs.has-commit == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo "Automated bump in two commits: bump-crds-version (config/, cmd/, …), then bump-chart-version (charts/tekton-operator), for ${{ inputs.version }}."
+            echo ""
+            echo "Merge this PR before triggering Patch Release so PAC builds the correct revision:"
+            echo "https://github.com/tektoncd/operator/actions/workflows/patch-release.yaml"
+          } >/tmp/pr-body.md
+          gh pr create \
+            --base "${{ inputs.branch }}" \
+            --head "${{ steps.bump.outputs.work-branch }}" \
+            --title "Prepare release ${{ inputs.version }}" \
+            --body-file /tmp/pr-body.md
+
+      - name: Skip notice
+        if: steps.bump.outputs.has-commit != 'true'
+        run: echo "::notice::No PR opened (no file changes after bump)."
