@@ -43,15 +43,15 @@ release_yaml() {
     case $version in
       nightly)
         dirVersion="0.0.0-nightly"
-        url="https://storage.googleapis.com/tekton-releases-nightly/${comp}/latest/${releaseFileName}.yaml"
+        url="https://infra.tekton.dev/tekton-releases-nightly/${comp}/latest/${releaseFileName}.yaml"
         ;;
       latest)
         dirVersion="0.0.0-latest"
-        url="https://storage.googleapis.com/tekton-releases/${comp}/latest/${releaseFileName}.yaml"
+        url="https://infra.tekton.dev/tekton-releases/${comp}/latest/${releaseFileName}.yaml"
         ;;
       *)
         dirVersion=${version//v}
-        url="https://storage.googleapis.com/tekton-releases/${comp}/previous/${version}/${releaseFileName}.yaml"
+        url="https://infra.tekton.dev/tekton-releases/${comp}/previous/${version}/${releaseFileName}.yaml"
         ;;
     esac
 
