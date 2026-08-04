@@ -580,10 +580,11 @@ spec:
           fi
           printf '%s' "${PREVIOUS}" > "$(results.previous-tag.path)"
 
-          # Use provided name or fall back to version
-          if [ -z "${NAME}" ]; then
-            NAME="Release ${VERSION}"
-          fi
+          # Leave the release name empty when not explicitly provided.
+          # The create-draft-release task's title logic only appends a
+          # quoted release name when one is given; synthesizing
+          # "Release ${VERSION}" here would make it look duplicated in
+          # the title (e.g. "... release v0.1.2 \"Release v0.1.2\"").
           printf '%s' "${NAME}" > "$(results.release-name.path)"
 
   - name: create-draft-release
