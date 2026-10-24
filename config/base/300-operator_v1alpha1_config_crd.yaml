@@ -49,3 +49,27 @@ spec:
         type: object
         description: Schema for the tektonconfigs API
         x-kubernetes-preserve-unknown-fields: true
+        properties:
+          spec:
+            type: object
+            properties:
+              config:
+                type: object
+                properties:
+                  nodeSelector:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  tolerations:
+                    type: array
+                    items:
+                      type: object
+                  priorityClassName:
+                    type: string
+                  imagePullSecrets:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
