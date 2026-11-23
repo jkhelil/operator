@@ -168,6 +168,7 @@ jobs:
         go-version-file: "go.mod"
     - name: verify CRD compatibility
       run: |
+        # crdify git:// refs cannot contain '/'; always pass a SHA.
         if [[ "${{ github.event_name }}" == "pull_request" ]]; then
           export COMPAT_BASELINE_REF="${{ github.event.pull_request.base.sha }}"
           git fetch --no-tags origin "${COMPAT_BASELINE_REF}"
@@ -175,7 +176,7 @@ jobs:
           # Fork push/dispatch demo: fork main may be stale; use tektoncd/operator main.
           git remote add upstream https://github.com/tektoncd/operator.git 2>/dev/null || true
           git fetch --no-tags upstream main
-          export COMPAT_BASELINE_REF=upstream/main
+          export COMPAT_BASELINE_REF="$(git rev-parse upstream/main)"
         fi
         echo "COMPAT_BASELINE_REF=${COMPAT_BASELINE_REF}"
         make verify-crd-compat
