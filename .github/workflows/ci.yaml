@@ -4,7 +4,10 @@ on:  # yamllint disable-line rule:truthy
   push:
     branches:
       - main
+      # Temporary for fork demo of crd-compat (remove after plumbing#3820 lands).
+      - feat/SRVKP-14977-crd-compat
   pull_request:  # yamllint disable-line rule:empty-values
+  workflow_dispatch:  # yamllint disable-line rule:empty-values
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull-request.number || github.ref }}
@@ -151,11 +154,10 @@ jobs:
     - name: generated
       run: |
         ./hack/verify-codegen.sh
-  # PR-only: compare operator CRDs to the PR base (plumbing#3820 / SRVKP-14977).
+  # Compare operator CRDs to PR base / main (plumbing#3820 / SRVKP-14977).
   crd-compat:
     name: CRD compatibility
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       with:
@@ -166,9 +168,15 @@ jobs:
         go-version-file: "go.mod"
     - name: verify CRD compatibility
       env:
-        COMPAT_BASELINE_REF: ${{ github.event.pull_request.base.sha }}
+        COMPAT_BASELINE_REF: ${{ github.event.pull_request.base.sha || github.sha }}
       run: |
-        git fetch --no-tags origin "${COMPAT_BASELINE_REF}"
+        # On push/workflow_dispatch, compare to origin/main when base.sha is unset.
+        if [[ "${{ github.event_name }}" != "pull_request" ]]; then
+          git fetch --no-tags origin main
+          export COMPAT_BASELINE_REF="$(git merge-base HEAD origin/main)"
+        else
+          git fetch --no-tags origin "${COMPAT_BASELINE_REF}"
+        fi
         make verify-crd-compat
   multi-arch-build:
     needs: [build]
