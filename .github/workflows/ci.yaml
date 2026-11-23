@@ -167,16 +167,17 @@ jobs:
       with:
         go-version-file: "go.mod"
     - name: verify CRD compatibility
-      env:
-        COMPAT_BASELINE_REF: ${{ github.event.pull_request.base.sha || github.sha }}
       run: |
-        # On push/workflow_dispatch, compare to origin/main when base.sha is unset.
-        if [[ "${{ github.event_name }}" != "pull_request" ]]; then
-          git fetch --no-tags origin main
-          export COMPAT_BASELINE_REF="$(git merge-base HEAD origin/main)"
-        else
+        if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+          export COMPAT_BASELINE_REF="${{ github.event.pull_request.base.sha }}"
           git fetch --no-tags origin "${COMPAT_BASELINE_REF}"
+        else
+          # Fork push/dispatch demo: fork main may be stale; use tektoncd/operator main.
+          git remote add upstream https://github.com/tektoncd/operator.git 2>/dev/null || true
+          git fetch --no-tags upstream main
+          export COMPAT_BASELINE_REF=upstream/main
         fi
+        echo "COMPAT_BASELINE_REF=${COMPAT_BASELINE_REF}"
         make verify-crd-compat
   multi-arch-build:
     needs: [build]
