@@ -151,6 +151,25 @@ jobs:
     - name: generated
       run: |
         ./hack/verify-codegen.sh
+  # PR-only: compare operator CRDs to the PR base (plumbing#3820 / SRVKP-14977).
+  crd-compat:
+    name: CRD compatibility
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+      with:
+        go-version-file: "go.mod"
+    - name: verify CRD compatibility
+      env:
+        COMPAT_BASELINE_REF: ${{ github.event.pull_request.base.sha }}
+      run: |
+        git fetch --no-tags origin "${COMPAT_BASELINE_REF}"
+        make verify-crd-compat
   multi-arch-build:
     needs: [build]
     name: Multi-arch build
