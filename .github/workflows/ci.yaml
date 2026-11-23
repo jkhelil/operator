@@ -4,7 +4,10 @@ on:  # yamllint disable-line rule:truthy
   push:
     branches:
       - main
+      # Temporary for fork demo of crd-compat (remove after plumbing#3820 lands).
+      - feat/SRVKP-14977-crd-compat
   pull_request:  # yamllint disable-line rule:empty-values
+  workflow_dispatch:  # yamllint disable-line rule:empty-values
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull-request.number || github.ref }}
@@ -151,6 +154,32 @@ jobs:
     - name: generated
       run: |
         ./hack/verify-codegen.sh
+  # Compare operator CRDs to PR base / main (plumbing#3820 / SRVKP-14977).
+  crd-compat:
+    name: CRD compatibility
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+      with:
+        go-version-file: "go.mod"
+    - name: verify CRD compatibility
+      run: |
+        # crdify git:// refs cannot contain '/'; always pass a SHA.
+        if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+          export COMPAT_BASELINE_REF="${{ github.event.pull_request.base.sha }}"
+          git fetch --no-tags origin "${COMPAT_BASELINE_REF}"
+        else
+          # Fork push/dispatch demo: fork main may be stale; use tektoncd/operator main.
+          git remote add upstream https://github.com/tektoncd/operator.git 2>/dev/null || true
+          git fetch --no-tags upstream main
+          export COMPAT_BASELINE_REF="$(git rev-parse upstream/main)"
+        fi
+        echo "COMPAT_BASELINE_REF=${COMPAT_BASELINE_REF}"
+        make verify-crd-compat
   multi-arch-build:
     needs: [build]
     name: Multi-arch build
