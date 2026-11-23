@@ -54,6 +54,9 @@ $(BIN)/golangci-lint: | $(BIN) ; $(info $(M) getting golangci-lint $(GOLANGCI_VE
 		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/main/install.sh | sh -s -- -b $(BIN) $(GOLANGCI_VERSION); \
 	fi
 
+# crdify: used by vendored plumbing scripts/verify-crd-compat.sh (plumbing#3820).
+CRDIFY_VERSION ?= v0.6.0
+
 ##@ Clean 
 .PHONY: clean-cluster
 clean-cluster: | $(KO) $(KUSTOMIZE) clean-cr; $(info $(M) clean $(TARGET)) @ ## Cleanup cluster
@@ -223,6 +226,11 @@ lint-yaml: ${YAML_FILES} ## runs yamllint on all yaml files
 	@echo "Linting yaml files..."
 	@yamllint -c .yamllint $(YAML_FILES)
 
+# CRD OpenAPI compatibility via vendored plumbing (SRVKP-14977 / plumbing#3820).
+# PR CI: COMPAT_BASELINE_REF=<base-sha> or PULL_BASE_SHA
+.PHONY: verify-crd-compat
+verify-crd-compat: ## fail on breaking CRD schema changes vs baseline
+	$Q ./hack/verify-crd-compat.sh
 
 # Prerequisite: docker [or] podman and kind
 # this will deploy a local registry using docker and create a kind cluster
